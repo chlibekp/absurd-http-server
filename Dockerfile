@@ -7,5 +7,7 @@ RUN make
 
 FROM scratch
 COPY --from=build /src/build/absurd /absurd
+COPY www /www
 EXPOSE 8080
 ENTRYPOINT ["/absurd"]
+CMD ["/www"]
