@@ -37,6 +37,9 @@ challenge /protected/
 challenge_difficulty 12
 header_timeout 3
 upstream_timeout 2
+# qemu's user-mode network takes ~0.3 s per forwarded connect: keep the
+# connections of the many-connections test alive while the rest are opened
+idle_timeout 300
 EOC
 cat > $R/init <<EOI
 #!/bin/sh
@@ -57,5 +60,6 @@ qemu-system-aarch64 -M virt -cpu max -smp 2 -m 1024 -kernel "$VM/vmlinuz" -initr
 QPID=$!
 for i in $(seq 1 120); do grep -q "listening on https" $W/console.log 2>/dev/null && break; sleep 1; done
 grep absurd: $W/console.log || { cat $W/console.log; exit 1; }
-EXPECT_PEER=10.0.2.2 EXPECT_UPHOST=10.0.2.2:18090 CONFIG_CHECK_BINARY="qemu-aarch64-static $BIN" \
+if [ -n "$VM_CMD" ]; then sh -c "$VM_CMD"; exit; fi   # e.g. VM_CMD="curl -s localhost:18081/"
+CONNS=${CONNS:-200} EXPECT_PEER=10.0.2.2 EXPECT_UPHOST=10.0.2.2:18090 CONFIG_CHECK_BINARY="qemu-aarch64-static $BIN" \
   python3 "$REPO/test/run.py" --external "$@"

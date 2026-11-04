@@ -431,7 +431,7 @@ def split_at_every_offset():
 
 @test
 def many_connections():
-    socks = [conn() for _ in range(2000)]
+    socks = [conn() for _ in range(int(os.environ.get("CONNS", "2000")))]
     for s in socks: s.sendall(req(b"/style.css"))
     for s in socks: assert Reader(s).response()[0] == 200
     for s in socks: s.close()
