@@ -415,6 +415,12 @@ void out_add(struct outq *q, const void *p, size_t len) {
 
 void out_ref(struct outq *q, const void *p, size_t len) {
     if (!len) return;
+    // Small pieces are cheaper copied: pipelined responses then leave as one
+    // contiguous buffer instead of many tiny iovecs. Large bodies stay by reference.
+    if (len < 1024) {
+        out_add(q, p, len);
+        return;
+    }
     struct seg *s = seg_new(q);
     s->p = p;
     s->off = 0;

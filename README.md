@@ -190,16 +190,28 @@ make cross-arm64 && test/vm.sh         # the same suite against the arm64 build,
 
 ## Performance
 
-Measured with `wrk` on the same 4-vCPU x86_64 cloud VM, serving the 37-byte test `index.html` over keep-alive connections:
+Setup: one absurd worker pinned to one core of a shared 4-vCPU x86_64 cloud VM (Xeon, 2.8 GHz), wrk on the other three cores, 96 keep-alive connections, serving the 37-byte test `index.html`. Each figure is the median of three runs of `bench/local.sh`, which you can run on your own machine.
 
-| | req/s |
-|---|---:|
-| 1 server thread (1 core) | 88k |
-| 2 server threads (2 cores) | 176k |
+| | absurd, one core | do-nothing server, same setup |
+|---|---:|---:|
+| pipelined, 16 requests per write | **1.32M req/s** | 1.87M req/s |
+| one request at a time | 92k req/s | 104k req/s |
 
-This is a shared VM, and wrk runs on the same machine, so treat these as orders of magnitude. Throughput scales with cores because the workers share nothing: each has its own listener, steered to its CPU.
+The do-nothing server is a 30-line epoll loop that answers every request with a fixed buffer, with no parsing and no checks. It shows what the kernel allows on this machine.
 
-`bench/` compares absurd with nginx under the same conditions:
+- **One request at a time,** throughput is limited by the kernel, not by absurd. Even the do-nothing server spends most of the core in TCP, and 27% just waking wrk's threads on the other CPUs. absurd is within run-to-run noise of it.
+- **Pipelined,** the kernel cost is shared by 16 requests, and absurd's own work shows. That work is a full RFC 9112 parse and validation of every request, a hash-table lookup, and conditional and range checks.
+
+What keeps that work small:
+- the request head is scanned 16 bytes at a time with SSE2 or NEON
+- responses are pre-rendered at startup
+- the `Date` line is rendered once a second
+- pipelined responses leave in one `sendmsg`, as one contiguous buffer
+- large bodies are sent straight from the snapshot without copying
+
+Workers share nothing (each has its own listener, steered to its CPU), so throughput scales with cores.
+
+`bench/run.sh` and `bench/percore.sh` compare absurd with nginx:
 
 ```sh
 docker build -t absurd-bench bench

@@ -44,9 +44,18 @@ static char *astrdup(const char *s, size_t n) {
 
 static uint64_t hash(const char *p, size_t n) {
     const uint64_t k = 0x9e3779b97f4a7c15ULL;
-    uint64_t h = g_seed ^ (n * k);
-    for (size_t i = 0; i < n; i++) {
-        h ^= (unsigned char)p[i];
+    uint64_t h = g_seed ^ (n * k), w;
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        memcpy(&w, p + i, 8);
+        h ^= w;
+        h *= k;
+        h ^= h >> 29;
+    }
+    if (i < n) {
+        w = 0;
+        memcpy(&w, p + i, n - i);
+        h ^= w;
         h *= k;
         h ^= h >> 29;
     }

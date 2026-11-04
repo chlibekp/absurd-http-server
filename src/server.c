@@ -48,7 +48,9 @@ void ep_set(struct worker *w, int fd, void *ptr, uint32_t *cur, uint32_t want) {
 static void set_date(struct worker *w) {
     char d[30];
     fmt_http_date(d, w->now);
-    w->datelen = (size_t)snprintf(w->date, sizeof w->date, "Date: %s\r\n", d);
+    static const char *const tail[3] = {"\r\n", "Connection: close\r\n\r\n", "Connection: keep-alive\r\n\r\n"};
+    for (int i = 0; i < 3; i++)
+        w->datelen[i] = (size_t)snprintf(w->date[i], sizeof w->date[i], "Date: %s\r\n%s", d, tail[i]);
 }
 
 static int64_t now_s(void) {
@@ -140,8 +142,10 @@ static void read_input(struct conn *c) {
             c->eof = true;
             break;
         }
+        size_t room = INCAP - c->inlen;
         c->inlen += (size_t)n;
         c->last = c->w->now;
+        if (!c->ssl && (size_t)n < room) break;   // drained; TLS may still hold decrypted records
     }
 }
 

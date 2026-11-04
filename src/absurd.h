@@ -188,8 +188,11 @@ struct worker {
     struct listener ls[MAX_LISTEN];
     struct conn *conns;      // all live connections, for the timeout sweep
     int64_t now;
-    char date[64];           // "Date: ...\r\n"
-    size_t datelen;
+    // the Date line and the end of the head, in three variants (plain, close,
+    // keep-alive). Responses reference these bytes; they change once a second,
+    // always to a valid line of the same length.
+    char date[3][80];
+    size_t datelen[3];
     char path[PATHMAX + 16]; // decoded request path
     bool accept_paused;
     void **dead;             // objects closed during this batch of events, freed after it

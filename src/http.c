@@ -82,23 +82,73 @@ const char *status_text(int s) {
 // Returns the byte after the CRLF CRLF that ends the head, NULL if incomplete,
 // or (const char *)1 if the bytes are not valid HTTP: control characters other
 // than HTAB, DEL, CR not followed by LF, LF not preceded by CR.
+// Bytes that need a closer look: < 0x20 (CTL, HTAB, CR, LF) and DEL. special()
+// returns a mask with one bit (x86) or one nibble (arm64) per byte of a 16-byte
+// block; everything else is accepted 16 bytes at a time.
+#if defined(__SSE2__)
+#include <emmintrin.h>
+enum { STRIDE = 1 };
+static inline uint64_t special(const char *q) {
+    __m128i v = _mm_loadu_si128((const __m128i *)q);
+    __m128i ctl = _mm_cmpeq_epi8(_mm_min_epu8(v, _mm_set1_epi8(0x1f)), v);
+    __m128i del = _mm_cmpeq_epi8(v, _mm_set1_epi8(0x7f));
+    return (uint64_t)_mm_movemask_epi8(_mm_or_si128(ctl, del));
+}
+#elif defined(__aarch64__)
+#include <arm_neon.h>
+enum { STRIDE = 4 };
+static inline uint64_t special(const char *q) {
+    uint8x16_t v = vld1q_u8((const uint8_t *)q);
+    uint8x16_t m = vorrq_u8(vcleq_u8(v, vdupq_n_u8(0x1f)), vceqq_u8(v, vdupq_n_u8(0x7f)));
+    return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(m), 4)), 0);
+}
+#else
+enum { STRIDE = 1 };
+static inline uint64_t special(const char *q) {
+    uint64_t m = 0;
+    for (int i = 0; i < 16; i++)
+        if ((unsigned char)q[i] < 0x20 || q[i] == 0x7f) m |= 1ull << i;
+    return m;
+}
+#endif
+
+// Returns the byte after the CRLF CRLF that ends the head, NULL if incomplete,
+// or (const char *)1 if the bytes are not valid HTTP: control characters other
+// than HTAB, DEL, CR not followed by LF, LF not preceded by CR.
 const char *http_scan_head(const char *p, const char *end) {
-    for (const char *q = p; q < end; q++) {
-        unsigned char c = (unsigned char)*q;
-        if (c >= 0x20 && c != 0x7f) continue;
-        if (c == '\t') continue;
-        if (c == '\r') {
-            if (q + 1 < end && q[1] != '\n') return (const char *)1;
-            continue;
+    const char *q = p;
+    for (;;) {
+        uint64_t m;
+        int n;
+        if (end - q >= 16) {
+            m = special(q);
+            n = 16;
+        } else if (q < end) {
+            m = 0;
+            n = (int)(end - q);
+            for (int i = 0; i < n; i++)
+                if ((unsigned char)q[i] < 0x20 || q[i] == 0x7f) m |= 1ull << (i * STRIDE);
+        } else {
+            return NULL;
         }
-        if (c == '\n') {
-            if (q == p || q[-1] != '\r') return (const char *)1;
-            if (q - p >= 3 && q[-2] == '\n' && q[-3] == '\r') return q + 1;
-            continue;
+        while (m) {
+            int i = __builtin_ctzll(m) / STRIDE;
+            m &= ~(((1ull << STRIDE) - 1) << (i * STRIDE));
+            const char *c = q + i;
+            if (*c == '\t') continue;
+            if (*c == '\r') {
+                if (c + 1 < end && c[1] != '\n') return (const char *)1;
+                continue;
+            }
+            if (*c == '\n') {
+                if (c == p || c[-1] != '\r') return (const char *)1;
+                if (c - p >= 3 && c[-2] == '\n' && c[-3] == '\r') return c + 1;
+                continue;
+            }
+            return (const char *)1;
         }
-        return (const char *)1;
+        q += n;
     }
-    return NULL;
 }
 
 // ---------------------------------------------------------------- validators
@@ -192,6 +242,7 @@ static bool prefix_match(const char *path, size_t n, const char *pre, size_t pl)
 
 // ---------------------------------------------------------------- the parser
 static const char *const methods[] = {NULL, "GET", "HEAD", "OPTIONS", "POST", "PUT", "DELETE", "PATCH", "TRACE", "CONNECT"};
+static const unsigned char mlen[] = {0, 3, 4, 7, 4, 3, 6, 5, 5, 7};
 
 #define FAIL(code)              \
     do {                        \
@@ -223,7 +274,10 @@ const char *http_parse(struct worker *w, const char *p, const char *end, uint32_
     r->mth = (struct span){p, q};
     r->method = MT_UNKNOWN;
     for (int i = 1; i <= MT_CONNECT; i++)
-        if ((size_t)(q - p) == strlen(methods[i]) && !memcmp(p, methods[i], (size_t)(q - p))) r->method = i;
+        if ((size_t)(q - p) == mlen[i] && !memcmp(p, methods[i], mlen[i])) {
+            r->method = i;
+            break;
+        }
     const char *t0 = q + 1, *t1 = t0;
     while ((unsigned char)*t1 > 0x20 && (unsigned char)*t1 < 0x7f) t1++;
     if (t1 == t0 || *t1 != ' ') FAIL(400);   // HTAB, raw non-ASCII, missing version
@@ -508,13 +562,8 @@ static_body:
 
 // ---------------------------------------------------------------- responses
 void http_end_head(struct outq *q, struct worker *w, bool close, bool ka) {
-    out_add(q, w->date, w->datelen);
-    if (close)
-        out_add(q, "Connection: close\r\n\r\n", 21);
-    else if (ka)
-        out_add(q, "Connection: keep-alive\r\n\r\n", 26);
-    else
-        out_add(q, "\r\n", 2);
+    int v = close ? 1 : ka ? 2 : 0;
+    out_ref(q, w->date[v], w->datelen[v]);
 }
 
 // A short text/plain response. Returns whether the connection must close.
