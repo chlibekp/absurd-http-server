@@ -1,6 +1,6 @@
 # absurd configuration. One directive per line; '#' starts a comment.
 # Start with:  absurd -c absurd.conf
-# Command-line options given after -c override it (-p port, -t threads, root).
+# The command-line options -p, -t and a document root override this file.
 
 # Addresses to listen on: [IPv4:]PORT, optionally "tls". Several are allowed.
 listen 8080

@@ -3,21 +3,63 @@
 absurd is a sandboxed static-file web server and reverse proxy for Linux, written in C. It builds into one static binary for **x86_64 and arm64**. It speaks HTTP/1.1 (RFC 9110/9112) over plain TCP or TLS. Point it at a directory and it serves that directory from memory. It can forward path prefixes to upstream servers, and can make clients solve a JavaScript proof-of-work challenge first.
 
 ```sh
-make                                   # static build: build/absurd (needs OpenSSL headers + static libs)
+make                                   # static build: build/absurd
 ./build/absurd -p 8080 ./www           # serves ./www on :8080
 ./build/absurd -c absurd.conf          # or configure everything in a file
-
-docker build -t absurd .
-docker run --rm -p 8080:8080 -v "$PWD/www:/www:ro" absurd
 ```
 
 The doc root is snapshotted at startup, so **restart the server after changing files**.
 
-Requirements: Linux ≥ 3.17 on x86_64 or arm64. To build, you need a C compiler and OpenSSL (`libssl-dev`, or `openssl-dev openssl-libs-static` on Alpine). `make NO_TLS=1` builds without OpenSSL.
+absurd started out as a server written in AArch64 assembly on io_uring; that version is in the git history. The current C version keeps its design: in-memory snapshot, one pinned worker per CPU, privilege drop and a seccomp sandbox.
+
+## Building
+
+Requirements: Linux ≥ 3.17 on x86_64 or arm64, a C compiler, and OpenSSL with static libraries. On Debian/Ubuntu that's `libssl-dev`; on Alpine it's `openssl-dev openssl-libs-static linux-headers`.
+
+```sh
+make                 # native build (x86_64 or arm64): build/absurd
+make NO_TLS=1        # without OpenSSL; tls listeners are then refused at startup
+make cross-arm64     # arm64 binary on an x86_64 Debian/Ubuntu host: build/arm64/absurd
+                     #   (apt install gcc-aarch64-linux-gnu libssl-dev:arm64)
+```
+
+The binary is statically linked, so it runs on any Linux distribution, or in a `scratch` container:
+
+```sh
+docker build -t absurd .
+docker run --rm -p 8080:8080 -v "$PWD/www:/www:ro" absurd
+
+# with a config file and certificates
+docker run --rm -p 8080:8080 -p 8443:8443 -v "$PWD/www:/www:ro" \
+  -v "$PWD/absurd.conf:/absurd.conf:ro" -v "$PWD/certs:/certs:ro" absurd -c /absurd.conf
+```
+
+## Usage
+
+```
+absurd [-c config] [-p port] [-t threads] [document-root]
+```
+
+- **`-c FILE`:** read a config file (see below).
+- **`-p PORT`:** port of the first listener (default 8080).
+- **`-t N`:** worker threads (default: one per CPU).
+- **document root:** the directory to serve (default `.`).
+
+`-p`, `-t` and the document root override the config file, wherever they appear on the command line. absurd must start as root to drop privileges to `nobody`. Started as another user, it keeps that user and serves what that user can read.
 
 ## Configuration
 
-`absurd -c FILE` reads a config file: one directive per line, with `#` comments. See [`absurd.conf.example`](absurd.conf.example).
+`absurd -c FILE` reads a config file: one directive per line, with `#` comments. See [`absurd.conf.example`](absurd.conf.example). A site with HTTPS, an API backend and the challenge in front of everything:
+
+```
+listen 80
+listen 443 tls
+tls_cert /etc/absurd/fullchain.pem
+tls_key  /etc/absurd/privkey.pem
+root /srv/www
+proxy /api/ 127.0.0.1:3000
+challenge /
+```
 
 | directive | meaning |
 |---|---|
@@ -32,7 +74,7 @@ Requirements: Linux ≥ 3.17 on x86_64 or arm64. To build, you need a C compiler
 | `header_timeout`, `idle_timeout`, `send_timeout`, `upstream_timeout` | seconds (15, 30, 60, 60) |
 | `max_body BYTES` | largest request body skipped on static targets (default 1 MiB) |
 
-Errors are reported as `file:line: message`, and absurd exits with status 2. Command-line options given after `-c` override the file: `-p` sets the first listener's port, `-t` sets threads, and a bare argument sets the root.
+Errors are reported as `file:line: message`, and absurd exits with status 2.
 
 ## HTTP conformance
 
@@ -144,9 +186,26 @@ make cross-arm64 && test/vm.sh         # the same suite against the arm64 build,
 - TLS with ALPN, the config file errors
 - a 5000-request pipeline, slow readers, byte-at-a-time and split requests, 2000 concurrent connections, connection churn, and fuzzing
 
-`test/vm.sh` runs on any Linux host. It boots an Ubuntu arm64 kernel under `qemu-system-aarch64` and runs the suite against the cross-compiled binary.
+`test/vm.sh` runs on any Linux host with `qemu-system-arm`, `qemu-user-static`, `cpio` and `openssl`. It downloads an Ubuntu arm64 kernel and busybox once, into `~/.cache/absurd-vm`. Then it boots them under `qemu-system-aarch64` and runs the suite against the cross-compiled binary. Because qemu's user-mode network is slow to connect, the VM run uses 200 concurrent connections instead of 2000.
 
-`bench/` has wrk-based comparisons against nginx (`docker build -t absurd-bench bench`, then run `bench/run.sh` inside it).
+## Performance
+
+Measured with `wrk` on the same 4-vCPU x86_64 cloud VM, serving the 37-byte test `index.html` over keep-alive connections:
+
+| | req/s |
+|---|---:|
+| 1 server thread (1 core) | 88k |
+| 2 server threads (2 cores) | 176k |
+
+This is a shared VM, and wrk runs on the same machine, so treat these as orders of magnitude. Throughput scales with cores because the workers share nothing: each has its own listener, steered to its CPU.
+
+`bench/` compares absurd with nginx under the same conditions:
+
+```sh
+docker build -t absurd-bench bench
+docker run --rm -v "$PWD":/src absurd-bench sh -c 'cd /src && make clean && make && bench/run.sh'
+docker run --rm -v "$PWD":/src absurd-bench sh -c 'cd /src && make clean && make && bench/percore.sh'
+```
 
 ## Limits
 
