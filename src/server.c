@@ -77,7 +77,7 @@ static void conn_new(struct worker *w, const struct listener *l, int fd, uint32_
     c->peer = peer;
     c->last = w->now;
     if (l->cfg->tls) {
-        c->ssl = tls_new(fd);
+        c->ssl = atls_new(fd);
         if (!c->ssl) {
             free(in);
             free(c);
@@ -105,7 +105,7 @@ void conn_close(struct conn *c) {
     struct worker *w = c->w;
     if (c->type != EV_CONN) return;
     if (c->px) proxy_abort(c->px);
-    if (c->ssl) tls_free(c->ssl);
+    if (c->ssl) atls_free(c->ssl);
     close(c->fd);
     if (c->prev) c->prev->next = c->next;
     else w->conns = c->next;
@@ -124,7 +124,7 @@ static void read_input(struct conn *c) {
     while (!c->eof && !c->closing && c->inlen < INCAP) {
         ssize_t n;
         if (c->ssl) {
-            n = tls_read(c->ssl, c->in + c->inlen, INCAP - c->inlen);
+            n = atls_read(c->ssl, c->in + c->inlen, INCAP - c->inlen);
             if (n == -1) break;
             if (n == -2) {
                 c->closing = true;
@@ -156,7 +156,7 @@ static void write_output(struct conn *c) {
         if (c->ssl) {
             struct seg *s = &q->segs[q->head];
             const char *p = (s->p ? s->p : q->buf + s->off) + q->done;
-            n = tls_write(c->ssl, p, s->len - q->done);
+            n = atls_write(c->ssl, p, s->len - q->done);
             if (n == -1) break;
             if (n == -2) {
                 c->closing = true;
@@ -258,7 +258,7 @@ static void parse_requests(struct conn *c) {
 void conn_update(struct conn *c) {
     uint32_t want = 0;
     if (c->handshaking) {
-        want = tls_wants_write(c->ssl) ? EPOLLOUT : EPOLLIN;
+        want = atls_wants_write(c->ssl) ? EPOLLOUT : EPOLLIN;
     } else if (c->lingering) {
         want = EPOLLIN;
     } else {
@@ -272,7 +272,7 @@ void conn_update(struct conn *c) {
 // client closes too, so a response is not destroyed by a reset.
 static void start_linger(struct conn *c) {
     if (c->ssl) {
-        tls_free(c->ssl);
+        atls_free(c->ssl);
         c->ssl = NULL;
     }
     shutdown(c->fd, SHUT_WR);
@@ -288,7 +288,7 @@ void conn_process(struct conn *c) {
             return;
         }
         if (c->handshaking) {
-            int r = tls_handshake(c->ssl);
+            int r = atls_handshake(c->ssl);
             if (r < 0) {
                 conn_close(c);
                 return;
@@ -580,7 +580,7 @@ int main(int argc, char **argv) {
             if (setsockopt(lfds[0][i], SOL_SOCKET, SO_ATTACH_REUSEPORT_CBPF, &prog, sizeof prog)) steered = false;
     }
 
-    tls_init();   // keys are read while still root
+    atls_init();   // keys are read while still root
 
     if (getuid() == 0) {   // drop root before touching the document root
         if (setgroups(0, NULL) || setgid(65534) || setuid(65534)) die("dropping privileges");

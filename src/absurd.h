@@ -254,14 +254,14 @@ void challenge_page(struct outq *q, struct worker *w, bool close, bool ka, bool 
 void challenge_pass(struct outq *q, struct worker *w, bool close, bool ka, uint32_t peer, const struct span *target, bool tls);
 
 // ---------------------------------------------------------------- TLS
-void tls_init(void);
-SSL *tls_new(int fd);
-void tls_free(SSL *ssl);
+void atls_init(void);
+SSL *atls_new(int fd);
+void atls_free(SSL *ssl);
 // >0 bytes, 0 EOF, -1 would block, -2 error
-ssize_t tls_read(SSL *ssl, void *buf, size_t len);
-ssize_t tls_write(SSL *ssl, const void *buf, size_t len);
-int tls_handshake(SSL *ssl);   // 1 done, 0 in progress, -1 failed
-bool tls_wants_write(SSL *ssl);
+ssize_t atls_read(SSL *ssl, void *buf, size_t len);
+ssize_t atls_write(SSL *ssl, const void *buf, size_t len);
+int atls_handshake(SSL *ssl);   // 1 done, 0 in progress, -1 failed
+bool atls_wants_write(SSL *ssl);
 
 // ---------------------------------------------------------------- server glue
 void conn_update(struct conn *c);

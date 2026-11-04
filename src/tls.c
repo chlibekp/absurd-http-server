@@ -9,16 +9,16 @@
 
 #ifdef NO_TLS
 
-void tls_init(void) {
+void atls_init(void) {
     for (int i = 0; i < cfg.nlisten; i++)
         if (cfg.listen[i].tls) fatal("this build has no TLS support (built with NO_TLS)");
 }
-SSL *tls_new(int fd) { (void)fd; return NULL; }
-void tls_free(SSL *ssl) { (void)ssl; }
-ssize_t tls_read(SSL *ssl, void *buf, size_t len) { (void)ssl; (void)buf; (void)len; return -2; }
-ssize_t tls_write(SSL *ssl, const void *buf, size_t len) { (void)ssl; (void)buf; (void)len; return -2; }
-int tls_handshake(SSL *ssl) { (void)ssl; return -1; }
-bool tls_wants_write(SSL *ssl) { (void)ssl; return false; }
+SSL *atls_new(int fd) { (void)fd; return NULL; }
+void atls_free(SSL *ssl) { (void)ssl; }
+ssize_t atls_read(SSL *ssl, void *buf, size_t len) { (void)ssl; (void)buf; (void)len; return -2; }
+ssize_t atls_write(SSL *ssl, const void *buf, size_t len) { (void)ssl; (void)buf; (void)len; return -2; }
+int atls_handshake(SSL *ssl) { (void)ssl; return -1; }
+bool atls_wants_write(SSL *ssl) { (void)ssl; return false; }
 
 #else
 
@@ -50,7 +50,7 @@ _Noreturn static void ssl_fatal(const char *what) {
     fatal("TLS: %s: %s", what, buf);
 }
 
-void tls_init(void) {
+void atls_init(void) {
     bool need = false;
     for (int i = 0; i < cfg.nlisten; i++) need |= cfg.listen[i].tls;
     if (!need) return;
@@ -74,7 +74,7 @@ void tls_init(void) {
     if (RAND_bytes(b, sizeof b) != 1) ssl_fatal("RAND_bytes");
 }
 
-SSL *tls_new(int fd) {
+SSL *atls_new(int fd) {
     SSL *ssl = SSL_new(ctx);
     if (!ssl) return NULL;
     SSL_set_fd(ssl, fd);
@@ -82,7 +82,7 @@ SSL *tls_new(int fd) {
     return ssl;
 }
 
-void tls_free(SSL *ssl) {
+void atls_free(SSL *ssl) {
     if (!ssl) return;
     ERR_clear_error();
     SSL_shutdown(ssl);   // best effort close_notify
@@ -99,26 +99,26 @@ static ssize_t result(SSL *ssl, int r) {
     return -2;
 }
 
-ssize_t tls_read(SSL *ssl, void *buf, size_t len) {
+ssize_t atls_read(SSL *ssl, void *buf, size_t len) {
     ERR_clear_error();
     int r = SSL_read(ssl, buf, len > 1 << 30 ? 1 << 30 : (int)len);
     return r > 0 ? r : result(ssl, r);
 }
 
-ssize_t tls_write(SSL *ssl, const void *buf, size_t len) {
+ssize_t atls_write(SSL *ssl, const void *buf, size_t len) {
     ERR_clear_error();
     int r = SSL_write(ssl, buf, len > 1 << 20 ? 1 << 20 : (int)len);
     return r > 0 ? r : result(ssl, r);
 }
 
-int tls_handshake(SSL *ssl) {
+int atls_handshake(SSL *ssl) {
     ERR_clear_error();
     int r = SSL_do_handshake(ssl);
     if (r == 1) return 1;
     return result(ssl, r) == -1 ? 0 : -1;
 }
 
-bool tls_wants_write(SSL *ssl) {
+bool atls_wants_write(SSL *ssl) {
     return SSL_want_write(ssl);
 }
 
