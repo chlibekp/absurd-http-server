@@ -2,7 +2,7 @@
 # Runs inside the bench container: server on CPUs 0-2, wrk on CPUs 3-5.
 set -e
 DUR=${DUR:-10s}
-python3 /src/bench/stress.py fixture /tmp/site; chmod -R a+rX /tmp/site
+python3 /src/test/run.py fixture /tmp/site; chmod -R a+rX /tmp/site
 taskset -c 0-2 /src/build/absurd -p 8080 /tmp/site >/dev/null &
 taskset -c 0-2 nginx -c /src/bench/nginx.conf &
 sleep 1

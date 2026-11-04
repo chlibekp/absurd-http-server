@@ -1,0 +1,38 @@
+# absurd configuration. One directive per line; '#' starts a comment.
+# Start with:  absurd -c absurd.conf
+# Command-line options given after -c override it (-p port, -t threads, root).
+
+# Addresses to listen on: [IPv4:]PORT, optionally "tls". Several are allowed.
+listen 8080
+#listen 0.0.0.0:8443 tls
+
+# Certificate chain and private key (PEM) for tls listeners. They are read
+# before privileges are dropped, so the key may be readable by root only.
+#tls_cert /etc/absurd/fullchain.pem
+#tls_key  /etc/absurd/privkey.pem
+
+# Worker threads (default: one per CPU).
+#threads 4
+
+# Directory to serve. It is snapshotted into memory at startup.
+root /www
+
+# Reverse proxy: requests whose path starts with PREFIX go to the upstream
+# (IPv4:PORT). The first matching route wins; paths are forwarded unchanged.
+#proxy /api/ 127.0.0.1:3000
+
+# JS challenge: requests under PREFIX must come from a browser that ran the
+# proof-of-work script (bots that do not run JavaScript stop at a 403 page).
+# "challenge /" protects everything. Several prefixes are allowed.
+#challenge /
+#challenge_difficulty 16      # leading zero bits of SHA-256, 1..32 (16 is ~0.1-0.3 s in a browser)
+#challenge_ttl 3600           # seconds a solved challenge stays valid
+
+# Timeouts in seconds.
+#header_timeout 15            # to deliver a complete request head (then 408)
+#idle_timeout 30              # idle keep-alive connections
+#send_timeout 60              # a response making no progress
+#upstream_timeout 60          # an upstream making no progress (then 504)
+
+# Largest request body skipped for requests answered from the snapshot (bytes).
+#max_body 1048576

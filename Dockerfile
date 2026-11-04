@@ -1,5 +1,5 @@
 FROM alpine:3.20 AS build
-RUN apk add --no-cache binutils make
+RUN apk add --no-cache build-base linux-headers openssl-dev openssl-libs-static
 WORKDIR /src
 COPY Makefile .
 COPY src ./src

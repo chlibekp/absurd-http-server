@@ -3,7 +3,7 @@
 DUR=${DUR:-8s}
 sed -e 's/worker_processes 3;/worker_processes 1;/' -e 's/worker_cpu_affinity .*;/worker_cpu_affinity 1;/' \
   /src/bench/nginx.conf > /tmp/nginx1.conf
-python3 /src/bench/stress.py fixture /tmp/site; chmod -R a+rX /tmp/site
+python3 /src/test/run.py fixture /tmp/site; chmod -R a+rX /tmp/site
 taskset -c 0 /src/build/absurd -p 8080 -t 1 /tmp/site >/dev/null &
 taskset -c 0 nginx -c /tmp/nginx1.conf &
 sleep 1
